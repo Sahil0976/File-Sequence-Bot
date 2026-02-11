@@ -1,0 +1,3 @@
+aiogram
+tgcrypto
+pymongo
