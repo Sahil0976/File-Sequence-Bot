@@ -78,6 +78,31 @@ def delete_custom_caption(user_id: int) -> bool:
     users_collection.update_one({"user_id": user_id}, {"$unset": {"custom_caption": ""}})
     return True
 
+def get_dump_channel_id(user_id: int):
+    user_data = get_user(user_id)
+    if not user_data:
+        return None
+    return user_data.get("dump_channel_id")
+
+def set_dump_channel_id(user_id: int, username: str, channel_id: int) -> None:
+    users_collection.update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "dump_channel_id": channel_id,
+                "username": username,
+            }
+        },
+        upsert=True,
+    )
+
+def delete_dump_channel_id(user_id: int) -> bool:
+    user_data = get_user(user_id)
+    if not user_data or "dump_channel_id" not in user_data:
+        return False
+
+    users_collection.update_one({"user_id": user_id}, {"$unset": {"dump_channel_id": ""}})
+    return True
 
 def get_top_users(limit: int = 10):
     return users_collection.find().sort("files_sequenced", -1).limit(limit)
