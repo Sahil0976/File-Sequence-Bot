@@ -351,6 +351,18 @@ async def capture_dump_channel_id(message: Message):
         parse_mode=ParseMode.HTML,
     )
 
+@router.message(F.text & ~F.text.startswith("/"))
+async def invalid_dump_channel_input(message: Message):
+    user_id = message.from_user.id
+    if user_id not in awaiting_dump_channel_input:
+        return
+    
+    await message.reply(
+        "Invalid channel ID format. Please send a valid channel ID starting with -100 followed by digits.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 #================================================================#
 
 @router.callback_query(F.data.startswith("mode:set:"))
