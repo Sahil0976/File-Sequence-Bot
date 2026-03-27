@@ -12,7 +12,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from config import BOT_TOKEN
-from db import get_custom_caption, get_user_mode, increment_files_sequenced
+from db import get_custom_caption, get_user_mode, increment_files_sequenced, get_dump_channel_id
 from plugins import router as plugins_router
 
 #================================================================#
@@ -194,6 +194,8 @@ async def end_sequence(message: Message):
     else:
         user_data["sorted_files"] = sorted(user_data["files"], key=natural_sort_key)
     custom_caption = get_custom_caption(user_id)
+    dump_channel_id = get_dump_channel_id(user_id)
+    target_chat_id = dump_channel_id if dump_channel_id else user_id
 
     total = len(user_data["sorted_files"])
     progress_msg = await message.reply(f"Sending 0/{total} files...")
@@ -212,7 +214,7 @@ async def end_sequence(message: Message):
 
             if file_message.document:
                 send_kwargs = {
-                    "chat_id": user_id,
+                    "chat_id": target_chat_id,
                     "document": file_message.document.file_id,
                     "disable_notification": True,
                 }
@@ -224,7 +226,7 @@ async def end_sequence(message: Message):
                 )
             elif file_message.video:
                 send_kwargs = {
-                    "chat_id": user_id,
+                    "chat_id": target_chat_id,
                     "video": file_message.video.file_id,
                     "disable_notification": True,
                 }
@@ -242,13 +244,40 @@ async def end_sequence(message: Message):
         except Exception as err:
             logging.error("Error sending file %s: %s", idx, err)
 
+            if target_chat_id == user_id:
+                try:
+                    if file_message.document:
+                        fallback_kwargs = {
+                            "chat_id": user_id,
+                            "document": file_message.document.file_id,
+                            "disable_notification": True,
+                        }
+                        if caption:
+                            fallback_kwargs["caption"] = caption
+                            fallback_kwargs["parse_mode"] = parse_mode
+                        await message.bot.send_document(**fallback_kwargs),
+
+                    elif file_message.video:
+                        fallback_kwargs = {
+                            "chat_id": user_id,
+                            "video": file_message.video.file_id,
+                            "disable_notification": True,
+                        }
+                        if caption:
+                            fallback_kwargs["caption"] = caption
+                            fallback_kwargs["parse_mode"] = parse_mode
+                        await message.bot.send_video(**fallback_kwargs)
+                except Exception as fallback_err:
+                    logging.error("Fallback error for file %s: %s", idx, fallback_err)
+
     await progress_msg.delete()
 
     increment_files_sequenced(user_id, message.from_user.first_name, total)
 
     user_data["completed"] = True
     await message.reply(
-        f"<b>File sequencing completed.</b>\n<b>You received {total} sequenced files.</b>",
+        f"<b>File sequencing completed.</b>",
+        f"<b>{total} sequenced files sucessfully sent to {'dump channel' if dump_channel_id else 'your private chat'}.</b>",
         parse_mode=ParseMode.HTML,
     )
 
