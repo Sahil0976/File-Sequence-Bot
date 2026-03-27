@@ -22,11 +22,15 @@ from db import (
     set_user_mode,
     total_files_sequenced,
     upsert_user,
+    delete_dump_channel_id,
+    set_dump_channel_id,
+    get_dump_channel_id
 )
 
 #================================================================#
 
 router = Router()
+awaiting_dump_channel_input = set()
 
 
 def start_keyboard() -> InlineKeyboardMarkup:
@@ -66,6 +70,31 @@ def mode_keyboard(selected_mode: str) -> InlineKeyboardMarkup:
         ]
     )
 
+def dump_setting_keyboard(can_delete: bool) -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton(text="Set Dump Channel", callback_data="dump:set"),
+            InlineKeyboardButton(text="Delete Dump Channel", callback_data="dump:delete") if can_delete else None,
+        ],
+        [
+            InlineKeyboardButton(icon_custom_emoji_id="6296577138615125756", text="Back", callback_data="close", style='danger')
+        ]
+    ]
+
+    if not can_delete:
+        keyboard[0] = [InlineKeyboardButton(text="Set Dump Channel", callback_data="dump:set")]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def dump_setting_text(current_dump_channel_id) -> str:
+    dump_text = f"Current Dump Channel ID: <code>{current_dump_channel_id}</code>\n\n" if current_dump_channel_id else "Not Set Yet."
+    return (
+        "<b> Dump Channel Settings</b>\n\n"
+        f"Current Dump Channel ID: <code>{current_dump_channel_id}</code>\n\n"
+        "Set Dump Channel: Use the button below and send the channel ID where you want the sequenced files to be dumped.\n\n"
+        "Delete Dump Channel: Use the button below to remove the currently set dump channel. This will stop files from being dumped to any channel."
+    )
+    
 #================================================================#
 
 @router.message(CommandStart())
@@ -180,6 +209,17 @@ async def mode_command(message: Message):
 
 #================================================================#
 
+@router.message(Command("dumpsettings"))
+async def dump_settings_command(message: Message):
+    current_dump_channel_id = get_dump_channel_id(message.chat.id)
+    await message.reply(
+        dump_setting_text(current_dump_channel_id),
+        parse_mode=ParseMode.HTML,
+        reply_markup = dump_setting_keyboard(bool(current_dump_channel_id))
+    )
+
+#================================================================#
+
 @router.message(Command("broadcast"))
 async def broadcast(message: Message):
     if message.from_user.id != OWNER_ID:
@@ -269,6 +309,58 @@ async def close_callback(query: CallbackQuery):
     except Exception:
         pass
     await query.answer()
+
+
+#================================================================#
+# Dump callback data
+
+@router.callback_query(F.data == "dump:set")
+async def set_dump_callback(query: CallbackQuery):
+    awaiting_dump_channel_input.add(query.from_user.id)
+    await query.message.reply(
+        f"Please send your dump channel ID.\nExample: <code>-1001234567890</code>",
+        parse_mode=ParseMode.HTML,
+    )
+    await query.answer()
+
+@router.callback_query(F.data == "dump:delete")
+async def delete_dump_callback(query: CallbackQuery):
+    delete = delete_dump_channel_id(query.from_user.id)
+    current_dump_channel_id = None
+
+    await query.message.edit_text(
+        dump_setting_text(current_dump_channel_id), 
+        parse_mode=ParseMode.HTML,
+        reply_markup=dump_setting_keyboard(False)
+    )
+    await query.answer("Dump channel deleted." if delete else "No dump channel was set.")
+
+
+@router.message(F.text.regexp(r"^-100\d{5,}$"))
+async def capture_dump_channel_id(message: Message):
+    user_id = message.chat.id
+    if user_id not in awaiting_dump_channel_input:
+        return
+    
+    channel_id = int(message.text.strip())
+    set_dump_channel_id(user_id, message.from_user.first_name, channel_id)
+    awaiting_dump_channel_input.discard(user_id)
+
+    await message.reply(
+        f"Dump Channel set successfully to <code>{channel_id}</code>.\n\nFiles will now be dumped to this channel.",
+        parse_mode=ParseMode.HTML,
+    )
+
+@router.message(F.text & ~F.text.startswith("/"))
+async def invalid_dump_channel_input(message: Message):
+    user_id = message.from_user.id
+    if user_id not in awaiting_dump_channel_input:
+        return
+    
+    await message.reply(
+        "Invalid channel ID format. Please send a valid channel ID starting with -100 followed by digits.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 #================================================================#
